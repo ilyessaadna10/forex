@@ -1,0 +1,36 @@
+# .github/workflows/forex-analysis.yml
+name: Forex Analysis
+
+on:
+  schedule:
+    # Run 10 minutes after 4H candle closes (00:10, 04:10, 08:10, 12:10, 16:10, 20:10 UTC)
+    - cron: '10 0,4,8,12,16,20 * * *'
+  workflow_dispatch:  # Manual trigger button
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      run: npm install dotenv
+    
+    - name: Run Analysis
+      env:
+        TWELVEDATA_API_KEY_DAILY: ${{ secrets.API_KEY_DAILY }}
+        TWELVEDATA_API_KEY_H4: ${{ secrets.API_KEY_H4 }}
+      run: node forex-analysis.js
+    
+    - name: Save Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: analysis-results
+        path: results.json
+        retention-days: 30
