@@ -1,16 +1,14 @@
 // ============================================
-// COMPLETE FOREX TECHNICAL ANALYSIS SCRIPT
-// Fetches data from TwelveData API and performs comprehensive analysis
+// ENHANCED FOREX ANALYSIS - LEADING + LAGGING INDICATORS
+// Solves lagging indicator problem with price action, momentum, and structure
 // ============================================
+
+
 
 const API_KEYS = {
   daily: process.env.TWELVEDATA_API_KEY_DAILY,
   h4: process.env.TWELVEDATA_API_KEY_H4
 };
-
-// ============================================
-// CONFIGURATION
-// ============================================
 
 const CONFIG = {
   pairs: [
@@ -21,11 +19,239 @@ const CONFIG = {
     daily: { interval: '1day', outputsize: 100 },
     h4: { interval: '4h', outputsize: 200 }
   },
-  apiDelay: 1000 // Delay between API calls to avoid rate limits
+  apiDelay: 1000
 };
 
 // ============================================
-// DATA FETCHING
+// LEADING INDICATORS (Price Action Based)
+// ============================================
+
+// 1. ORDER FLOW ANALYSIS - Detects institutional buying/selling
+function analyzeOrderFlow(candles, lookback = 20) {
+  const recent = candles.slice(-lookback);
+  
+  let buyingPressure = 0;
+  let sellingPressure = 0;
+  
+  recent.forEach(c => {
+    const bodySize = Math.abs(c.close - c.open);
+    const range = c.high - c.low;
+    const bodyRatio = bodySize / range;
+    
+    // Strong bullish candle = buying pressure
+    if (c.close > c.open && bodyRatio > 0.6) {
+      buyingPressure += bodySize;
+    }
+    // Strong bearish candle = selling pressure
+    else if (c.close < c.open && bodyRatio > 0.6) {
+      sellingPressure += bodySize;
+    }
+  });
+  
+  const netPressure = buyingPressure - sellingPressure;
+  const totalPressure = buyingPressure + sellingPressure;
+  const pressureRatio = totalPressure > 0 ? netPressure / totalPressure : 0;
+  
+  return {
+    buying: buyingPressure,
+    selling: sellingPressure,
+    net: netPressure,
+    bias: pressureRatio > 0.3 ? 'bullish' : pressureRatio < -0.3 ? 'bearish' : 'neutral',
+    strength: Math.abs(pressureRatio),
+    signal: pressureRatio > 0.5 ? 'strong_buy' : pressureRatio < -0.5 ? 'strong_sell' : 'neutral'
+  };
+}
+
+// 2. MOMENTUM SHIFT DETECTION - Catches trend changes early
+function detectMomentumShift(candles, rsi) {
+  const last10 = candles.slice(-10);
+  const last5 = candles.slice(-5);
+  
+  // Price momentum
+  const priceChange5 = last5[last5.length - 1].close - last5[0].close;
+  const priceChange10 = last10[last10.length - 1].close - last10[0].close;
+  
+  // Candle body sizes (momentum strength)
+  const avgBody10 = last10.reduce((sum, c) => sum + Math.abs(c.close - c.open), 0) / 10;
+  const avgBody5 = last5.reduce((sum, c) => sum + Math.abs(c.close - c.open), 0) / 5;
+  const bodyAcceleration = avgBody5 / avgBody10;
+  
+  // RSI momentum
+  const rsiLast = rsi.slice(-5);
+  const rsiRising = rsiLast.filter((v, i) => i > 0 && v > rsiLast[i - 1]).length >= 3;
+  const rsiFalling = rsiLast.filter((v, i) => i > 0 && v < rsiLast[i - 1]).length >= 3;
+  
+  // Divergence detection (leading signal)
+  const priceHigher = last5[last5.length - 1].high > last5[0].high;
+  const priceLower = last5[last5.length - 1].low < last5[0].low;
+  const rsiHigher = rsiLast[rsiLast.length - 1] > rsiLast[0];
+  const rsiLower = rsiLast[rsiLast.length - 1] < rsiLast[0];
+  
+  const bullishDivergence = priceLower && rsiHigher;
+  const bearishDivergence = priceHigher && rsiLower;
+  
+  return {
+    acceleration: bodyAcceleration,
+    accelerating: bodyAcceleration > 1.2,
+    decelerating: bodyAcceleration < 0.8,
+    momentum5Candles: priceChange5 > 0 ? 'bullish' : 'bearish',
+    momentum10Candles: priceChange10 > 0 ? 'bullish' : 'bearish',
+    rsiMomentum: rsiRising ? 'rising' : rsiFalling ? 'falling' : 'flat',
+    divergence: bullishDivergence ? 'bullish' : bearishDivergence ? 'bearish' : 'none',
+    earlySignal: bullishDivergence || bearishDivergence
+  };
+}
+
+// 3. PRICE ACTION STRENGTH - Real-time momentum
+function analyzePriceActionStrength(candles, lookback = 20) {
+  const recent = candles.slice(-lookback);
+  const last = candles[candles.length - 1];
+  const prev = candles[candles.length - 2];
+  
+  // Current candle characteristics
+  const body = Math.abs(last.close - last.open);
+  const range = last.high - last.low;
+  const bodyRatio = body / range;
+  const isBullish = last.close > last.open;
+  
+  // Average candle size (context)
+  const avgBody = recent.reduce((sum, c) => sum + Math.abs(c.close - c.open), 0) / lookback;
+  const avgRange = recent.reduce((sum, c) => sum + (c.high - c.low), 0) / lookback;
+  
+  // Rejection wicks (support/resistance testing)
+  const upperWick = last.high - Math.max(last.open, last.close);
+  const lowerWick = Math.min(last.open, last.close) - last.low;
+  const upperRejection = upperWick > body * 1.5;
+  const lowerRejection = lowerWick > body * 1.5;
+  
+  // Consecutive candles in same direction
+  let consecutiveBull = 0, consecutiveBear = 0;
+  for (let i = recent.length - 1; i >= 0; i--) {
+    if (recent[i].close > recent[i].open) {
+      if (consecutiveBear === 0) consecutiveBull++;
+      else break;
+    } else {
+      if (consecutiveBull === 0) consecutiveBear++;
+      else break;
+    }
+  }
+  
+  return {
+    currentBody: body,
+    avgBody: avgBody,
+    strength: body / avgBody, // >1.5 = strong momentum
+    bodyRatio: bodyRatio, // >0.7 = conviction
+    upperRejection: upperRejection,
+    lowerRejection: lowerRejection,
+    consecutiveBullish: consecutiveBull,
+    consecutiveBearish: consecutiveBear,
+    momentum: consecutiveBull >= 3 ? 'strong_bullish' : 
+              consecutiveBear >= 3 ? 'strong_bearish' : 'neutral',
+    signal: lowerRejection && isBullish && body > avgBody ? 'bullish_reversal' :
+            upperRejection && !isBullish && body > avgBody ? 'bearish_reversal' : 'none'
+  };
+}
+
+// 4. SUPPORT/RESISTANCE STRENGTH with Price Approaching
+function analyzeLevelStrength(candles, swings, currentPrice, atr) {
+  const levels = identifySupportResistance(swings, currentPrice, atr);
+  
+  // Find nearest level
+  const nearest = levels.length > 0 ? levels[0] : null;
+  
+  if (!nearest) {
+    return {
+      nearLevel: false,
+      distance: null,
+      strength: 0,
+      type: null,
+      priceAction: null
+    };
+  }
+  
+  // Check if price is approaching or at the level
+  const distanceATR = Math.abs(currentPrice - nearest.price) / atr;
+  const approaching = distanceATR < 0.5; // Within 0.5 ATR
+  const atLevel = distanceATR < 0.2; // Very close
+  
+  // Check recent price action at this level
+  const last5 = candles.slice(-5);
+  const testingLevel = last5.some(c => {
+    const cRange = c.high - c.low;
+    return (nearest.type === 'support' && c.low <= nearest.price + cRange * 0.3) ||
+           (nearest.type === 'resistance' && c.high >= nearest.price - cRange * 0.3);
+  });
+  
+  return {
+    nearLevel: approaching,
+    atLevel: atLevel,
+    distance: Math.abs(currentPrice - nearest.price),
+    distanceATR: distanceATR,
+    strength: nearest.strength,
+    type: nearest.type,
+    price: nearest.price,
+    testing: testingLevel,
+    signal: atLevel && nearest.type === 'support' ? 'potential_bounce' :
+            atLevel && nearest.type === 'resistance' ? 'potential_rejection' : 'none'
+  };
+}
+
+// 5. LIQUIDITY ZONES - Where big orders cluster
+function identifyLiquidityZones(candles, atr) {
+  const zones = [];
+  const lookback = Math.min(50, candles.length);
+  const recent = candles.slice(-lookback);
+  
+  // Find where price stalled or reversed sharply
+  for (let i = 1; i < recent.length - 1; i++) {
+    const curr = recent[i];
+    const prev = recent[i - 1];
+    const next = recent[i + 1];
+    
+    // Sharp reversal candle
+    const sharpReversalUp = prev.close < prev.open && curr.close > curr.open && 
+                            Math.abs(curr.close - curr.open) > atr * 0.5;
+    const sharpReversalDown = prev.close > prev.open && curr.close < curr.open && 
+                              Math.abs(curr.close - curr.open) > atr * 0.5;
+    
+    if (sharpReversalUp || sharpReversalDown) {
+      zones.push({
+        price: sharpReversalUp ? curr.low : curr.high,
+        type: sharpReversalUp ? 'demand' : 'supply',
+        strength: Math.abs(curr.close - curr.open) / atr,
+        time: curr.time
+      });
+    }
+  }
+  
+  // Consolidation zones (liquidity builds up)
+  const tolerance = atr * 0.3;
+  const consolidations = [];
+  
+  for (let i = 5; i < recent.length; i++) {
+    const slice = recent.slice(i - 5, i);
+    const high = Math.max(...slice.map(c => c.high));
+    const low = Math.min(...slice.map(c => c.low));
+    
+    if (high - low < atr * 1.5) { // Tight range = consolidation
+      consolidations.push({
+        price: (high + low) / 2,
+        type: 'consolidation',
+        strength: 5,
+        range: high - low
+      });
+    }
+  }
+  
+  return {
+    reversalZones: zones.slice(-5),
+    consolidations: consolidations.slice(-3),
+    hasNearbyZone: zones.some(z => Math.abs(z.price - candles[candles.length - 1].close) < atr * 0.5)
+  };
+}
+
+// ============================================
+// EXISTING FUNCTIONS (Keep all your original functions)
 // ============================================
 
 async function fetchData(pair, interval, apiKey) {
@@ -56,7 +282,6 @@ async function fetchAllData(pairs) {
   for (const pair of pairs) {
     console.log(`Fetching data for ${pair}...`);
     
-    // Fetch both timeframes
     const [h4Data, dailyData] = await Promise.all([
       fetchData(pair, '4h', API_KEYS.h4),
       fetchData(pair, '1day', API_KEYS.daily)
@@ -68,16 +293,11 @@ async function fetchAllData(pairs) {
       daily: dailyData
     });
     
-    // Delay to respect rate limits
     await delay(CONFIG.apiDelay);
   }
   
   return results;
 }
-
-// ============================================
-// DATA NORMALIZATION
-// ============================================
 
 function normalize(data) {
   if (!data || !Array.isArray(data)) return [];
@@ -94,10 +314,6 @@ function normalize(data) {
     volume: parseFloat(c.volume || 0)
   }));
 }
-
-// ============================================
-// TECHNICAL INDICATORS
-// ============================================
 
 function calculateSMA(data, period) {
   const result = [];
@@ -187,48 +403,6 @@ function calculateATR(candles, period = 14) {
   };
 }
 
-function calculateBollingerBands(candles, period = 20, stdDev = 2) {
-  if (candles.length < period) return { upper: [], middle: [], lower: [] };
-  
-  const closes = candles.map(c => c.close);
-  const middle = [];
-  const upper = [];
-  const lower = [];
-  
-  for (let i = period - 1; i < closes.length; i++) {
-    const slice = closes.slice(i - period + 1, i + 1);
-    const sma = slice.reduce((a, b) => a + b, 0) / period;
-    const variance = slice.reduce((a, b) => a + Math.pow(b - sma, 2), 0) / period;
-    const std = Math.sqrt(variance);
-    
-    middle.push(sma);
-    upper.push(sma + std * stdDev);
-    lower.push(sma - std * stdDev);
-  }
-  
-  return { upper, middle, lower };
-}
-
-function calculateStochastic(candles, period = 14, smoothK = 3, smoothD = 3) {
-  if (candles.length < period) return { k: [], d: [] };
-  
-  const rawK = [];
-  for (let i = period - 1; i < candles.length; i++) {
-    const slice = candles.slice(i - period + 1, i + 1);
-    const high = Math.max(...slice.map(c => c.high));
-    const low = Math.min(...slice.map(c => c.low));
-    const close = candles[i].close;
-    
-    const k = ((close - low) / (high - low)) * 100;
-    rawK.push(isNaN(k) ? 50 : k);
-  }
-  
-  const smoothedK = calculateSMA(rawK, smoothK);
-  const smoothedD = calculateSMA(smoothedK, smoothD);
-  
-  return { k: smoothedK, d: smoothedD };
-}
-
 function calculateADX(candles, period = 14) {
   if (candles.length < period + 1) return { adx: 0, plusDI: 0, minusDI: 0, values: [] };
   
@@ -264,10 +438,6 @@ function calculateADX(candles, period = 14) {
   const current = adxValues[adxValues.length - 1] || { adx: 0, plusDI: 0, minusDI: 0 };
   return { ...current, values: adxValues };
 }
-
-// ============================================
-// MARKET STRUCTURE
-// ============================================
 
 function identifySwingPoints(candles, lookback = 5) {
   const swings = [];
@@ -376,251 +546,198 @@ function identifySupportResistance(swings, currentPrice, atr) {
 }
 
 // ============================================
-// CANDLESTICK PATTERNS
+// ENHANCED ANALYSIS WITH LEADING INDICATORS
 // ============================================
 
-function identifyCandlePatterns(candles) {
-  if (candles.length < 3) return [];
+function performEnhancedAnalysis(h4Data, dailyData, pairName) {
+  // Get basic indicators first
+  const h4RSI = calculateRSI(h4Data, 14);
+  const h4MACD = calculateMACD(h4Data);
+  const h4ATR = calculateATR(h4Data, 14);
+  const h4ADX = calculateADX(h4Data, 14);
+  const h4Closes = h4Data.map(c => c.close);
+  const h4EMA20 = calculateEMA(h4Closes, 20);
+  const h4EMA50 = calculateEMA(h4Closes, 50);
   
-  const patterns = [];
-  const last3 = candles.slice(-3);
-  const [c2, c1, c0] = last3;
+  const currentPrice = h4Data[h4Data.length - 1].close;
+  const h4Swings = identifySwingPoints(h4Data, 5);
+  const h4Trend = identifyTrendStructure(h4Data, h4Swings);
   
-  const body = (c) => Math.abs(c.close - c.open);
-  const isBullish = (c) => c.close > c.open;
-  const upperWick = (c) => c.high - Math.max(c.open, c.close);
-  const lowerWick = (c) => Math.min(c.open, c.close) - c.low;
-  const range = (c) => c.high - c.low;
+  // NEW: LEADING INDICATORS
+  const orderFlow = analyzeOrderFlow(h4Data, 20);
+  const momentumShift = detectMomentumShift(h4Data, h4RSI);
+  const priceAction = analyzePriceActionStrength(h4Data, 20);
+  const levelStrength = analyzeLevelStrength(h4Data, h4Swings, currentPrice, h4ATR.current);
+  const liquidity = identifyLiquidityZones(h4Data, h4ATR.current);
   
-  // Engulfing patterns
-  if (isBullish(c0) && !isBullish(c1) && 
-      c0.close > c1.open && c0.open < c1.close && 
-      body(c0) > body(c1)) {
-    patterns.push({ name: 'Bullish Engulfing', strength: 'strong', direction: 'bullish' });
-  }
+  // COMPOSITE SIGNAL GENERATION
+  const signals = {
+    // Leading signals (early entry)
+    orderFlowSignal: orderFlow.signal,
+    momentumShiftSignal: momentumShift.earlySignal ? 
+      (momentumShift.divergence === 'bullish' ? 'early_buy' : 'early_sell') : 'none',
+    priceActionSignal: priceAction.signal,
+    levelApproach: levelStrength.signal,
+    
+    // Confirmation signals (reduce risk)
+    trendAlignment: h4Trend.structure === 'uptrend' ? 'bullish' : 
+                    h4Trend.structure === 'downtrend' ? 'bearish' : 'neutral',
+    rsiConfirmation: h4RSI[h4RSI.length - 1] < 35 ? 'oversold_buy' :
+                     h4RSI[h4RSI.length - 1] > 65 ? 'overbought_sell' : 'neutral',
+    macdConfirmation: h4MACD.histogram[h4MACD.histogram.length - 1] > 0 ? 'bullish' : 'bearish'
+  };
   
-  if (!isBullish(c0) && isBullish(c1) && 
-      c0.close < c1.open && c0.open > c1.close && 
-      body(c0) > body(c1)) {
-    patterns.push({ name: 'Bearish Engulfing', strength: 'strong', direction: 'bearish' });
-  }
+  // ENTRY TIMING SCORE (0-100)
+  let entryScore = 50; // Neutral starting point
   
-  // Hammer / Shooting Star
-  if (lowerWick(c0) > body(c0) * 2 && upperWick(c0) < body(c0) * 0.5) {
-    patterns.push({ 
-      name: isBullish(c0) ? 'Hammer' : 'Hanging Man', 
-      strength: 'moderate', 
-      direction: 'bullish' 
-    });
-  }
+  // Leading indicators (add points for early entry)
+  if (orderFlow.bias === 'bullish') entryScore += 10;
+  if (orderFlow.bias === 'bearish') entryScore -= 10;
+  if (momentumShift.divergence === 'bullish') entryScore += 15; // Strong leading signal
+  if (momentumShift.divergence === 'bearish') entryScore -= 15;
+  if (priceAction.signal === 'bullish_reversal') entryScore += 12;
+  if (priceAction.signal === 'bearish_reversal') entryScore -= 12;
+  if (levelStrength.signal === 'potential_bounce') entryScore += 10;
+  if (levelStrength.signal === 'potential_rejection') entryScore -= 10;
   
-  if (upperWick(c0) > body(c0) * 2 && lowerWick(c0) < body(c0) * 0.5) {
-    patterns.push({ 
-      name: 'Shooting Star', 
-      strength: 'moderate', 
-      direction: 'bearish' 
-    });
-  }
+  // Confirmation (validate the early signal)
+  if (h4Trend.structure === 'uptrend') entryScore += 8;
+  if (h4Trend.structure === 'downtrend') entryScore -= 8;
+  if (h4RSI[h4RSI.length - 1] < 30) entryScore += 8; // Oversold in uptrend = buy
+  if (h4RSI[h4RSI.length - 1] > 70) entryScore -= 8;
+  if (h4MACD.histogram[h4MACD.histogram.length - 1] > h4MACD.histogram[h4MACD.histogram.length - 2]) entryScore += 5;
+  else entryScore -= 5;
   
-  // Morning Star / Evening Star
-  if (!isBullish(c2) && body(c1) < body(c2) * 0.5 && isBullish(c0) && 
-      c0.close > (c2.open + c2.close) / 2) {
-    patterns.push({ name: 'Morning Star', strength: 'strong', direction: 'bullish' });
-  }
+  // Risk factors (reduce score)
+  if (h4ADX.adx < 15) entryScore -= 10; // Ranging market
+  if (!levelStrength.nearLevel && !liquidity.hasNearbyZone) entryScore -= 15; // No clear level
   
-  if (isBullish(c2) && body(c1) < body(c2) * 0.5 && !isBullish(c0) && 
-      c0.close < (c2.open + c2.close) / 2) {
-    patterns.push({ name: 'Evening Star', strength: 'strong', direction: 'bearish' });
-  }
-  
-  // Doji
-  if (body(c0) < range(c0) * 0.1) {
-    patterns.push({ name: 'Doji', strength: 'weak', direction: 'neutral' });
-  }
-  
-  return patterns;
-}
-
-// ============================================
-// COMPREHENSIVE ANALYSIS
-// ============================================
-
-function performCompleteAnalysis(h4Data, dailyData, pairName) {
   const analysis = {
     pair: pairName,
     timestamp: new Date().toISOString(),
     
     current: {
-      price: h4Data[h4Data.length - 1].close,
-      time: h4Data[h4Data.length - 1].time,
-      candle: {
-        open: h4Data[h4Data.length - 1].open,
-        high: h4Data[h4Data.length - 1].high,
-        low: h4Data[h4Data.length - 1].low,
-        close: h4Data[h4Data.length - 1].close,
-        isBullish: h4Data[h4Data.length - 1].close > h4Data[h4Data.length - 1].open
-      }
+      price: currentPrice,
+      time: h4Data[h4Data.length - 1].time
     },
     
-    indicators: {},
-    structure: {},
-    patterns: {},
-    timeframes: {}
-  };
-  
-  // Calculate H4 indicators
-  const h4Closes = h4Data.map(c => c.close);
-  const h4RSI = calculateRSI(h4Data, 14);
-  const h4MACD = calculateMACD(h4Data);
-  const h4ATR = calculateATR(h4Data, 14);
-  const h4BB = calculateBollingerBands(h4Data, 20, 2);
-  const h4Stoch = calculateStochastic(h4Data, 14, 3, 3);
-  const h4ADX = calculateADX(h4Data, 14);
-  const h4EMA20 = calculateEMA(h4Closes, 20);
-  const h4EMA50 = calculateEMA(h4Closes, 50);
-  const h4EMA200 = calculateEMA(h4Closes, 200);
-  
-  analysis.indicators.h4 = {
-    rsi: {
-      current: h4RSI[h4RSI.length - 1],
-      previous: h4RSI[h4RSI.length - 2],
-      status: h4RSI[h4RSI.length - 1] > 70 ? 'overbought' : 
-              h4RSI[h4RSI.length - 1] < 30 ? 'oversold' : 'neutral',
-      trending: h4RSI[h4RSI.length - 1] > h4RSI[h4RSI.length - 2] ? 'rising' : 'falling'
+    // LEADING INDICATORS (Main focus)
+    leadingIndicators: {
+      orderFlow: orderFlow,
+      momentumShift: momentumShift,
+      priceAction: priceAction,
+      levelStrength: levelStrength,
+      liquidityZones: liquidity
     },
-    macd: {
-      value: h4MACD.macd[h4MACD.macd.length - 1],
-      signal: h4MACD.signal[h4MACD.signal.length - 1],
-      histogram: h4MACD.histogram[h4MACD.histogram.length - 1],
-      histogramPrev: h4MACD.histogram[h4MACD.histogram.length - 2],
-      crossover: (h4MACD.histogram[h4MACD.histogram.length - 2] < 0 && 
-                  h4MACD.histogram[h4MACD.histogram.length - 1] > 0) ? 'bullish' :
-                 (h4MACD.histogram[h4MACD.histogram.length - 2] > 0 && 
-                  h4MACD.histogram[h4MACD.histogram.length - 1] < 0) ? 'bearish' : 'none',
-      trending: h4MACD.histogram[h4MACD.histogram.length - 1] > 
-                h4MACD.histogram[h4MACD.histogram.length - 2] ? 'strengthening' : 'weakening'
-    },
-    atr: {
-      current: h4ATR.current,
-      percentOfPrice: (h4ATR.current / analysis.current.price) * 100
-    },
-    bollingerBands: {
-      upper: h4BB.upper[h4BB.upper.length - 1],
-      middle: h4BB.middle[h4BB.middle.length - 1],
-      lower: h4BB.lower[h4BB.lower.length - 1],
-      width: h4BB.upper[h4BB.upper.length - 1] - h4BB.lower[h4BB.lower.length - 1],
-      position: ((analysis.current.price - h4BB.lower[h4BB.lower.length - 1]) / 
-                 (h4BB.upper[h4BB.upper.length - 1] - h4BB.lower[h4BB.lower.length - 1]) * 100),
-      squeeze: (h4BB.upper[h4BB.upper.length - 1] - h4BB.lower[h4BB.lower.length - 1]) < h4ATR.current * 2
-    },
-    stochastic: {
-      k: h4Stoch.k[h4Stoch.k.length - 1],
-      d: h4Stoch.d[h4Stoch.d.length - 1],
-      status: h4Stoch.k[h4Stoch.k.length - 1] > 80 ? 'overbought' :
-              h4Stoch.k[h4Stoch.k.length - 1] < 20 ? 'oversold' : 'neutral',
-      crossover: (h4Stoch.k[h4Stoch.k.length - 2] < h4Stoch.d[h4Stoch.d.length - 2] &&
-                  h4Stoch.k[h4Stoch.k.length - 1] > h4Stoch.d[h4Stoch.d.length - 1]) ? 'bullish' :
-                 (h4Stoch.k[h4Stoch.k.length - 2] > h4Stoch.d[h4Stoch.d.length - 2] &&
-                  h4Stoch.k[h4Stoch.k.length - 1] < h4Stoch.d[h4Stoch.d.length - 1]) ? 'bearish' : 'none'
-    },
-    adx: {
-      value: h4ADX.adx,
-      plusDI: h4ADX.plusDI,
-      minusDI: h4ADX.minusDI,
-      strength: h4ADX.adx > 25 ? 'strong' : h4ADX.adx > 20 ? 'moderate' : 'weak',
-      direction: h4ADX.plusDI > h4ADX.minusDI ? 'bullish' : 'bearish'
-    },
-    ema: {
-      ema20: h4EMA20[h4EMA20.length - 1],
-      ema50: h4EMA50[h4EMA50.length - 1],
-      ema200: h4EMA200.length > 0 ? h4EMA200[h4EMA200.length - 1] : null,
-      priceVsEMA20: analysis.current.price > h4EMA20[h4EMA20.length - 1] ? 'above' : 'below',
-      priceVsEMA50: analysis.current.price > h4EMA50[h4EMA50.length - 1] ? 'above' : 'below',
-      emaAlignment: h4EMA20[h4EMA20.length - 1] > h4EMA50[h4EMA50.length - 1] ? 'bullish' : 'bearish'
-    }
-  };
-  
-  // Daily indicators
-  if (dailyData && dailyData.length >= 50) {
-    const dailyCloses = dailyData.map(c => c.close);
-    const dailyRSI = calculateRSI(dailyData, 14);
-    const dailyMACD = calculateMACD(dailyData);
-    const dailyADX = calculateADX(dailyData, 14);
-    const dailyEMA20 = calculateEMA(dailyCloses, 20);
-    const dailyEMA50 = calculateEMA(dailyCloses, 50);
     
-    analysis.indicators.daily = {
+    // LAGGING INDICATORS (Confirmation only)
+    laggingIndicators: {
       rsi: {
-        current: dailyRSI[dailyRSI.length - 1],
-        status: dailyRSI[dailyRSI.length - 1] > 70 ? 'overbought' : 
-                dailyRSI[dailyRSI.length - 1] < 30 ? 'oversold' : 'neutral'
+        current: h4RSI[h4RSI.length - 1],
+        status: h4RSI[h4RSI.length - 1] > 70 ? 'overbought' : 
+                h4RSI[h4RSI.length - 1] < 30 ? 'oversold' : 'neutral'
       },
       macd: {
-        histogram: dailyMACD.histogram[dailyMACD.histogram.length - 1],
-        trending: dailyMACD.histogram[dailyMACD.histogram.length - 1] > 
-                  dailyMACD.histogram[dailyMACD.histogram.length - 2] ? 'strengthening' : 'weakening'
+        histogram: h4MACD.histogram[h4MACD.histogram.length - 1],
+        trending: h4MACD.histogram[h4MACD.histogram.length - 1] > 
+                  h4MACD.histogram[h4MACD.histogram.length - 2] ? 'up' : 'down'
       },
       adx: {
-        value: dailyADX.adx,
-        strength: dailyADX.adx > 25 ? 'strong' : dailyADX.adx > 20 ? 'moderate' : 'weak',
-        direction: dailyADX.plusDI > dailyADX.minusDI ? 'bullish' : 'bearish'
+        value: h4ADX.adx,
+        strength: h4ADX.adx > 25 ? 'strong' : h4ADX.adx > 15 ? 'moderate' : 'weak'
       },
       ema: {
-        ema20: dailyEMA20[dailyEMA20.length - 1],
-        ema50: dailyEMA50[dailyEMA50.length - 1],
-        priceVsEMA20: analysis.current.price > dailyEMA20[dailyEMA20.length - 1] ? 'above' : 'below',
-        emaAlignment: dailyEMA20[dailyEMA20.length - 1] > dailyEMA50[dailyEMA50.length - 1] ? 'bullish' : 'bearish'
+        ema20: h4EMA20[h4EMA20.length - 1],
+        ema50: h4EMA50[h4EMA50.length - 1],
+        alignment: h4EMA20[h4EMA20.length - 1] > h4EMA50[h4EMA50.length - 1] ? 'bullish' : 'bearish'
       }
-    };
-  }
-  
-  // Market Structure
-  const h4Swings = identifySwingPoints(h4Data, 5);
-  const h4Trend = identifyTrendStructure(h4Data, h4Swings);
-  const srLevels = identifySupportResistance(h4Swings, analysis.current.price, h4ATR.current);
-  
-  analysis.structure = {
-    trend: h4Trend.structure,
-    trendDetails: {
-      higherHighs: h4Trend.higherHighs,
-      lowerHighs: h4Trend.lowerHighs,
-      higherLows: h4Trend.higherLows,
-      lowerLows: h4Trend.lowerLows
     },
-    keyLevels: {
+    
+    structure: {
+      trend: h4Trend.structure,
       recentHigh: h4Trend.recentHigh,
-      recentLow: h4Trend.recentLow,
-      supportResistance: srLevels
+      recentLow: h4Trend.recentLow
     },
-    swingPoints: h4Swings.slice(-10)
-  };
-  
-  // Pattern Recognition
-  const candlePatterns = identifyCandlePatterns(h4Data);
-  
-  analysis.patterns = {
-    candlestick: candlePatterns,
-    recentPriceAction: {
-      last5Candles: h4Data.slice(-5).map(c => ({
-        time: c.time,
-        direction: c.close > c.open ? 'bullish' : 'bearish',
-        size: Math.abs(c.close - c.open),
-        range: c.high - c.low
-      })),
-      momentum: h4Data.slice(-5).filter(c => c.close > c.open).length >= 4 ? 'strong bullish' :
-                h4Data.slice(-5).filter(c => c.close < c.open).length >= 4 ? 'strong bearish' : 'mixed'
+    
+    // TRADING DECISION
+    tradingSignal: {
+      entryScore: Math.round(entryScore),
+      bias: entryScore > 60 ? 'BULLISH' : entryScore < 40 ? 'BEARISH' : 'NEUTRAL',
+      strength: entryScore > 70 || entryScore < 30 ? 'STRONG' : 
+                entryScore > 60 || entryScore < 40 ? 'MODERATE' : 'WEAK',
+      recommendation: entryScore > 65 ? 'BUY' : 
+                      entryScore < 35 ? 'SELL' : 'WAIT',
+      confidence: Math.abs(entryScore - 50) / 50 * 100, // 0-100%
+      
+      entryType: levelStrength.atLevel ? 'IMMEDIATE' : 
+                 levelStrength.nearLevel ? 'WAIT_FOR_LEVEL' : 
+                 momentumShift.earlySignal ? 'EARLY_ENTRY' : 'WAIT_FOR_SETUP',
+      
+      reasoning: generateReasoning(signals, orderFlow, momentumShift, priceAction, levelStrength, h4Trend, h4ADX)
+    },
+    
+    // KEY LEVELS
+    keyLevels: {
+      support: levelStrength.type === 'support' ? levelStrength.price : null,
+      resistance: levelStrength.type === 'resistance' ? levelStrength.price : null,
+      nearestLevel: levelStrength.price,
+      atr: h4ATR.current
     }
-  };
-  
-  // Multi-timeframe alignment
-  analysis.timeframes = {
-    h4Bias: analysis.indicators.h4.ema.emaAlignment,
-    dailyBias: analysis.indicators.daily ? analysis.indicators.daily.ema.emaAlignment : 'unknown',
-    aligned: analysis.indicators.daily ? 
-             (analysis.indicators.h4.ema.emaAlignment === analysis.indicators.daily.ema.emaAlignment) : false
   };
   
   return analysis;
+}
+
+function generateReasoning(signals, orderFlow, momentumShift, priceAction, levelStrength, trend, adx) {
+  const reasons = [];
+  
+  // Leading indicator signals
+  if (orderFlow.signal === 'strong_buy') {
+    reasons.push(`Strong buying pressure detected (${(orderFlow.strength * 100).toFixed(0)}% dominance)`);
+  } else if (orderFlow.signal === 'strong_sell') {
+    reasons.push(`Strong selling pressure detected (${(orderFlow.strength * 100).toFixed(0)}% dominance)`);
+  }
+  
+  if (momentumShift.divergence === 'bullish') {
+    reasons.push('Bullish divergence - price making lower lows but RSI rising (EARLY BUY SIGNAL)');
+  } else if (momentumShift.divergence === 'bearish') {
+    reasons.push('Bearish divergence - price making higher highs but RSI falling (EARLY SELL SIGNAL)');
+  }
+  
+  if (priceAction.signal === 'bullish_reversal') {
+    reasons.push(`Bullish reversal pattern with ${priceAction.strength.toFixed(1)}x average body size`);
+  } else if (priceAction.signal === 'bearish_reversal') {
+    reasons.push(`Bearish reversal pattern with ${priceAction.strength.toFixed(1)}x average body size`);
+  }
+  
+  if (levelStrength.atLevel) {
+    reasons.push(`Price AT ${levelStrength.type} level (${levelStrength.strength} touches) - HIGH PROBABILITY ZONE`);
+  } else if (levelStrength.nearLevel) {
+    reasons.push(`Price approaching ${levelStrength.type} (${levelStrength.distanceATR.toFixed(2)} ATR away)`);
+  }
+  
+  if (priceAction.consecutiveBullish >= 3) {
+    reasons.push(`${priceAction.consecutiveBullish} consecutive bullish candles - strong momentum`);
+  } else if (priceAction.consecutiveBearish >= 3) {
+    reasons.push(`${priceAction.consecutiveBearish} consecutive bearish candles - strong momentum`);
+  }
+  
+  // Trend confirmation
+  if (trend.structure === 'uptrend' && adx.adx > 20) {
+    reasons.push(`Clear uptrend structure with ADX ${adx.adx.toFixed(1)} (confirmed trend)`);
+  } else if (trend.structure === 'downtrend' && adx.adx > 20) {
+    reasons.push(`Clear downtrend structure with ADX ${adx.adx.toFixed(1)} (confirmed trend)`);
+  }
+  
+  if (momentumShift.accelerating) {
+    reasons.push(`Momentum accelerating (${momentumShift.acceleration.toFixed(2)}x) - entry timing is critical`);
+  }
+  
+  if (reasons.length === 0) {
+    reasons.push('No clear setup - wait for better entry conditions');
+  }
+  
+  return reasons;
 }
 
 // ============================================
@@ -628,16 +745,14 @@ function performCompleteAnalysis(h4Data, dailyData, pairName) {
 // ============================================
 
 async function main() {
-  console.log('='.repeat(50));
-  console.log('FOREX TECHNICAL ANALYSIS SCRIPT');
-  console.log('='.repeat(50));
+  console.log('='.repeat(60));
+  console.log('ENHANCED FOREX ANALYSIS - LEADING + LAGGING INDICATORS');
+  console.log('Solving Lagging Indicator Problem');
+  console.log('='.repeat(60));
   console.log(`Analyzing ${CONFIG.pairs.length} pairs...`);
   console.log('');
   
-  // Fetch all data
   const rawData = await fetchAllData(CONFIG.pairs);
-  
-  // Analyze each pair
   const results = [];
   
   for (const item of rawData) {
@@ -657,32 +772,55 @@ async function main() {
       const h4Data = normalize(item.h4);
       const dailyData = item.daily.length > 0 ? normalize(item.daily) : null;
       
-      const analysis = performCompleteAnalysis(h4Data, dailyData, item.pair);
+      const analysis = performEnhancedAnalysis(h4Data, dailyData, item.pair);
       
       results.push(analysis);
-      console.log(`  ✓ Analysis complete`);
+      
+      // Quick summary
+      const signal = analysis.tradingSignal;
+      console.log(`  ✓ ${signal.recommendation} (Score: ${signal.entryScore}/100, ${signal.strength})`);
+      console.log(`    Entry: ${signal.entryType}`);
+      if (analysis.leadingIndicators.momentumShift.divergence !== 'none') {
+        console.log(`    🔔 ${analysis.leadingIndicators.momentumShift.divergence.toUpperCase()} DIVERGENCE DETECTED!`);
+      }
       
     } catch (e) {
       console.error(`  ✗ Error: ${e.message}`);
       results.push({
         pair: item.pair,
-        error: e.message,
-        stack: e.stack
+        error: e.message
       });
     }
   }
   
   console.log('');
-  console.log('='.repeat(50));
+  console.log('='.repeat(60));
   console.log(`Analysis complete for ${results.length} pairs`);
-  console.log('='.repeat(50));
+  console.log('='.repeat(60));
+  console.log('');
+  console.log('TRADING SIGNALS SUMMARY:');
+  console.log('-'.repeat(60));
+  
+  const trades = results.filter(r => !r.error && r.tradingSignal.recommendation !== 'WAIT');
+  
+  if (trades.length === 0) {
+    console.log('No trading setups found. Wait for better opportunities.');
+  } else {
+    trades.sort((a, b) => b.tradingSignal.entryScore - a.tradingSignal.entryScore);
+    
+    trades.forEach((t, i) => {
+      console.log(`${i + 1}. ${t.pair}: ${t.tradingSignal.recommendation} (${t.tradingSignal.entryScore}/100)`);
+      console.log(`   Entry Type: ${t.tradingSignal.entryType}`);
+      console.log(`   Top Reason: ${t.tradingSignal.reasoning[0]}`);
+      console.log('');
+    });
+  }
   
   return results;
 }
 
-// Run the script
+// Browser/Node compatibility
 if (typeof module !== 'undefined' && require.main === module) {
-  // Node.js environment
   main().then(results => {
     console.log(JSON.stringify(results, null, 2));
   }).catch(error => {
@@ -690,11 +828,17 @@ if (typeof module !== 'undefined' && require.main === module) {
     process.exit(1);
   });
 } else if (typeof window !== 'undefined') {
-  // Browser environment
   console.log('Use main() to run analysis');
 }
 
-// Export for use as module
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { main, CONFIG, API_KEYS };
+  module.exports = { 
+    main, 
+    CONFIG, 
+    API_KEYS,
+    performEnhancedAnalysis,
+    analyzeOrderFlow,
+    detectMomentumShift,
+    analyzePriceActionStrength
+  };
 }
