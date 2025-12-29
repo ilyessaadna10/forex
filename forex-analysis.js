@@ -12,8 +12,8 @@ const API_KEYS = {
 
 const CONFIG = {
   pairs: [
-    'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 
-    'USD/CAD', 'NZD/USD', 'EUR/GBP', 'EUR/JPY', 'AUD/JPY'
+    'EUR/USD', 'GBP/JPY', 'USD/JPY', 'AUD/USD', 
+    'AUD/CHF', 'EUR/GBP', 'CAD/JPY', 'AUD/JPY'
   ],
   intervals: {
     daily: { interval: '1day', outputsize: 100 },
